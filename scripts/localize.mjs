@@ -18,6 +18,12 @@ const GTX =
 
 const cache = new Map()
 const failures = []
+const cachePath = join(root, 'scripts', 'translate-cache.json')
+
+const GTX_URLS = [
+  'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=',
+  'https://clients5.google.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=',
+]
 
 function cjkCount(s) {
   return (String(s || '').match(CJK_RE) || []).length
@@ -73,49 +79,103 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-async function translateOnce(text) {
-  const src = String(text || '').trim()
-  if (!src) return { ok: false, text: '', reason: 'empty' }
-  if (isMostlyChinese(src)) return { ok: true, text: polishZh(src), skipped: true }
-  if (cache.has(src)) return { ok: true, text: cache.get(src) }
-
-  const q = prepEnglish(src).slice(0, 1400)
-  const url = GTX + encodeURIComponent(q)
+async function fetchJson(url, timeout = 12000) {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 12000)
+  const timer = setTimeout(() => ctrl.abort(), timeout)
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
       headers: {
         'User-Agent':
-          'GlobalAIDigest/1.0 (+https://github.com/zrxpro51/global-ai-digest)',
+          'Mozilla/5.0 (compatible; GlobalAIDigest/1.0; +https://github.com/zrxpro51/global-ai-digest)',
         Accept: 'application/json, text/plain, */*',
       },
     })
-    if (!res.ok) return { ok: false, text: '', reason: `HTTP ${res.status}` }
-    const json = await res.json()
-    const chunks = Array.isArray(json?.[0]) ? json[0] : []
-    const out = polishZh(chunks.map((c) => c?.[0] || '').join(''))
-    if (!out || !cjkCount(out)) {
-      return { ok: false, text: '', reason: 'no-cjk-result' }
-    }
-    cache.set(src, out)
-    return { ok: true, text: out }
-  } catch (err) {
-    const reason =
-      err?.name === 'AbortError' ? 'timeout' : String(err?.message || err)
-    return { ok: false, text: '', reason }
+    return res
   } finally {
     clearTimeout(timer)
   }
 }
 
-async function translate(text, { retries = 2 } = {}) {
+function parseGtx(json) {
+  const chunks = Array.isArray(json?.[0]) ? json[0] : []
+  return polishZh(chunks.map((c) => (Array.isArray(c) ? c[0] : '') || '').join(''))
+}
+
+async function translateGtx(q) {
+  let last = { ok: false, text: '', reason: 'gtx' }
+  for (const base of GTX_URLS) {
+    try {
+      const res = await fetchJson(base + encodeURIComponent(q))
+      if (res.status === 429) {
+        last = { ok: false, text: '', reason: 'HTTP 429' }
+        continue
+      }
+      if (!res.ok) {
+        last = { ok: false, text: '', reason: `HTTP ${res.status}` }
+        continue
+      }
+      const json = await res.json()
+      const out = parseGtx(json)
+      if (out && cjkCount(out)) return { ok: true, text: out }
+      last = { ok: false, text: '', reason: 'no-cjk-result' }
+    } catch (err) {
+      last = {
+        ok: false,
+        text: '',
+        reason: err?.name === 'AbortError' ? 'timeout' : String(err?.message || err),
+      }
+    }
+  }
+  return last
+}
+
+async function translateMyMemory(q) {
+  const cut = q.slice(0, 450)
+  const url =
+    'https://api.mymemory.translated.net/get?langpair=en|zh-CN&q=' +
+    encodeURIComponent(cut)
+  try {
+    const res = await fetchJson(url, 15000)
+    if (!res.ok) return { ok: false, text: '', reason: `mymemory ${res.status}` }
+    const json = await res.json()
+    const out = polishZh(json?.responseData?.translatedText || '')
+    if (out && cjkCount(out) && !/MYMEMORY WARNING/i.test(out)) {
+      return { ok: true, text: out }
+    }
+    return { ok: false, text: '', reason: 'mymemory-empty' }
+  } catch (err) {
+    return {
+      ok: false,
+      text: '',
+      reason: err?.name === 'AbortError' ? 'mymemory-timeout' : String(err?.message || err),
+    }
+  }
+}
+
+async function translateOnce(text) {
+  const src = String(text || '').trim()
+  if (!src) return { ok: false, text: '', reason: 'empty' }
+  if (isMostlyChinese(src)) return { ok: true, text: polishZh(src), skipped: true }
+  if (cache.has(src)) return { ok: true, text: cache.get(src), cached: true }
+
+  const q = prepEnglish(src).slice(0, 1400)
+  let last = await translateGtx(q)
+  if (!last.ok) last = await translateMyMemory(q)
+  if (last.ok) {
+    cache.set(src, last.text)
+    return last
+  }
+  return last
+}
+
+async function translate(text, { retries = 4 } = {}) {
   let last = { ok: false, text: '', reason: 'unknown' }
   for (let i = 0; i <= retries; i++) {
     last = await translateOnce(text)
     if (last.ok) return last
-    await sleep(250 * (i + 1))
+    const wait = last.reason === 'HTTP 429' ? 1800 * (i + 1) : 300 * (i + 1)
+    await sleep(wait)
   }
   return last
 }
@@ -127,12 +187,34 @@ async function mapPool(items, limit, fn) {
     while (i < items.length) {
       const idx = i++
       out[idx] = await fn(items[idx], idx)
-      await sleep(90)
+      await sleep(120)
     }
   }
   const n = Math.min(limit, items.length)
   await Promise.all(Array.from({ length: n }, worker))
   return out
+}
+
+async function loadCache() {
+  try {
+    const data = JSON.parse(await readFile(cachePath, 'utf8'))
+    for (const [k, v] of Object.entries(data || {})) {
+      if (k && v) cache.set(k, v)
+    }
+    console.log(`Loaded ${cache.size} cached translations`)
+  } catch {
+    /* first run */
+  }
+}
+
+async function saveCache() {
+  const obj = {}
+  for (const [k, v] of cache) obj[k] = v
+  const keys = Object.keys(obj)
+  if (keys.length > 2500) {
+    for (const k of keys.slice(0, keys.length - 2500)) delete obj[k]
+  }
+  await writeFile(cachePath, JSON.stringify(obj))
 }
 
 const WHO = {
@@ -270,12 +352,14 @@ async function localizeItem(item) {
 }
 
 async function main() {
+  await loadCache()
   const raw = await readFile(newsPath, 'utf8')
   const payload = JSON.parse(raw)
   const items = payload.items || []
   console.log(`Localizing ${items.length} items…`)
 
-  const localized = await mapPool(items, 4, localizeItem)
+  const localized = await mapPool(items, 1, localizeItem)
+  await saveCache()
 
   payload.items = localized
   payload.localizedAt = new Date().toISOString()
