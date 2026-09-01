@@ -85,11 +85,17 @@ function attrTag(block, tagName, attrName) {
   return (alt || hrefs[0] || {}).href || ''
 }
 
-function summarize(text, max = 160) {
+function summarize(text, max = 520) {
   const clean = stripHtml(text)
     .replace(/^arXiv:\S+\s+Announce Type:\s+\w+\s*/i, '')
     .replace(/^Abstract:\s*/i, '')
+    .replace(/failed to fetch[^。.!?]*/gi, '')
+    .trim()
   if (!clean) return ''
+  // Drop alt-text-only captions that are not news.
+  if (/^(graphic|illustration|photo|image|video)\b/i.test(clean) && clean.length < 90) {
+    return ''
+  }
   if (clean.length <= max) return clean
   return clean.slice(0, max).replace(/\s+\S*$/, '') + '…'
 }
@@ -118,7 +124,7 @@ function categorize(feedId, title, summary, cats) {
     return '大模型'
   }
   if (
-    /launch|product|app|release|api|feature|产品|发布|ads|cursor|codex/.test(
+    /launch|product|\bapps?\b|release|\bapi\b|feature|产品|发布|\bads\b|cursor|codex/.test(
       blob,
     )
   ) {

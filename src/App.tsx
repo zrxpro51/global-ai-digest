@@ -5,12 +5,18 @@ type Category = '大模型' | '研究' | '产品' | '开源' | '业界'
 type NewsItem = {
   id: string
   title: string
+  titleOriginal?: string
+  titleZh?: string
   source: string
   sourceId: string
   category: Category
   publishedAt: string
   summary: string
+  summaryZh?: string
+  blurbZh?: string
+  analysisZh?: string[]
   url: string
+  sourceUrl?: string
 }
 
 type NewsPayload = {
@@ -21,11 +27,19 @@ type NewsPayload = {
   items: NewsItem[]
 }
 
+type Route =
+  | { name: 'home' }
+  | { name: 'about' }
+  | { name: 'article'; id: string }
+
 const CATS: Array<'全部' | Category> = ['全部', '大模型', '研究', '产品', '开源', '业界']
 
-function route(): 'home' | 'about' {
-  const h = window.location.hash.replace(/^#/, '')
-  return h.startsWith('/about') ? 'about' : 'home'
+function parseRoute(): Route {
+  const h = window.location.hash.replace(/^#/, '') || '/'
+  if (h.startsWith('/about')) return { name: 'about' }
+  const m = h.match(/^\/p\/([^/?#]+)/)
+  if (m) return { name: 'article', id: decodeURIComponent(m[1]) }
+  return { name: 'home' }
 }
 
 function formatTime(iso: string) {
@@ -56,8 +70,31 @@ function mastheadDate() {
   }).format(new Date())
 }
 
+function displayTitle(it: NewsItem) {
+  return it.titleZh || it.title
+}
+
+function displayBlurb(it: NewsItem) {
+  if (it.blurbZh) return it.blurbZh
+  const s = it.summaryZh || ''
+  if (s.length <= 96) return s
+  return s.slice(0, 96).replace(/\s+\S*$/, '') + '…'
+}
+
+function sourceLink(it: NewsItem) {
+  return it.sourceUrl || it.url
+}
+
+function analysisList(it: NewsItem): string[] {
+  if (Array.isArray(it.analysisZh) && it.analysisZh.length) return it.analysisZh
+  if (typeof it.analysisZh === 'string' && (it.analysisZh as string).trim()) {
+    return (it.analysisZh as string).split(/\n{2,}/).filter(Boolean)
+  }
+  return []
+}
+
 export default function App() {
-  const [page, setPage] = useState<'home' | 'about'>(route())
+  const [route, setRoute] = useState<Route>(parseRoute())
   const [menuOpen, setMenuOpen] = useState(false)
   const [data, setData] = useState<NewsPayload | null>(null)
   const [error, setError] = useState('')
@@ -66,8 +103,9 @@ export default function App() {
 
   useEffect(() => {
     const onHash = () => {
-      setPage(route())
+      setRoute(parseRoute())
       setMenuOpen(false)
+      window.scrollTo(0, 0)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -84,22 +122,48 @@ export default function App() {
       .catch((e) => setError(String(e.message || e)))
   }, [])
 
+  const article = useMemo(() => {
+    if (route.name !== 'article' || !data) return null
+    return data.items.find((it) => it.id === route.id) || null
+  }, [route, data])
+
+  useEffect(() => {
+    if (route.name === 'article' && article) {
+      document.title = `${displayTitle(article)} — 全球AI速递`
+    } else if (route.name === 'about') {
+      document.title = '关于 — 全球AI速递'
+    } else {
+      document.title = '全球AI速递 — 一分钟看完全球人工智能新闻'
+    }
+  }, [route, article])
+
   const filtered = useMemo(() => {
     const items = data?.items ?? []
     const query = q.trim().toLowerCase()
     return items.filter((it) => {
       if (cat !== '全部' && it.category !== cat) return false
       if (!query) return true
-      return (
-        it.title.toLowerCase().includes(query) ||
-        it.summary.toLowerCase().includes(query) ||
-        it.source.toLowerCase().includes(query)
-      )
+      const hay = [
+        it.titleZh,
+        it.summaryZh,
+        it.blurbZh,
+        ...(it.analysisZh || []),
+        it.titleOriginal,
+        it.title,
+        it.summary,
+        it.source,
+        it.category,
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .toLowerCase()
+      return hay.includes(query)
     })
   }, [data, q, cat])
 
   const featured = filtered[0]
   const rest = filtered.slice(1)
+  const page = route.name
 
   return (
     <>
@@ -108,7 +172,7 @@ export default function App() {
       </a>
       <header className="site-header">
         <div className="shell header-row">
-          <a className="brand" href="#/" onClick={() => setPage('home')}>
+          <a className="brand" href="#/">
             <span className="mark" aria-hidden>
               速
             </span>
@@ -142,13 +206,20 @@ export default function App() {
       <main id="main" className="shell">
         {page === 'about' ? (
           <About data={data} />
+        ) : page === 'article' ? (
+          <ArticleView
+            item={article}
+            loading={!data && !error}
+            error={error}
+            notFound={Boolean(data && !article)}
+          />
         ) : (
           <>
             <section className="masthead">
               <p className="kicker">全球人工智能晚报</p>
               <h1>一分钟看完今天的 AI</h1>
               <p className="lede">
-                从实验室到产品一线：OpenAI、DeepMind、Hugging Face、arXiv 与中文科技媒体的公开头条，杂志式速览，点标题直达原文。
+                从实验室到产品一线：OpenAI、DeepMind、Hugging Face、arXiv 与中文科技媒体的公开头条。点卡片看本站中文速读；原文自行打开。
               </p>
               <div className="meta-line">
                 <span>{mastheadDate()}</span>
@@ -169,7 +240,7 @@ export default function App() {
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="搜索标题、来源或摘要"
+                  placeholder="搜索中文标题、总结、分析或来源"
                   aria-label="搜索新闻"
                 />
               </label>
@@ -195,24 +266,22 @@ export default function App() {
 
             {featured && (
               <section className="featured" aria-label="头条">
-                <article className="hero">
+                <article className="hero hero-story">
                   <div className="row-meta">
                     <span className={`cat ${featured.category}`}>{featured.category}</span>
                     <span>{featured.source}</span>
                     <time dateTime={featured.publishedAt}>{formatTime(featured.publishedAt)}</time>
                   </div>
                   <h2>
-                    <a className="ext" href={featured.url} target="_blank" rel="noreferrer">
-                      {featured.title}
-                    </a>
+                    <a href={`#/p/${featured.id}`}>{displayTitle(featured)}</a>
                   </h2>
-                  <p className="summary">{featured.summary}</p>
+                  <p className="summary">{displayBlurb(featured)}</p>
                 </article>
                 <aside className="hero">
                   <p className="kicker">速览</p>
-                  <h2 style={{ fontSize: '1.25rem' }}>不必翻完时间线</h2>
+                  <h2 style={{ fontSize: '1.25rem' }}>点卡片看本站中文速读</h2>
                   <p className="summary">
-                    构建时抓取公开 RSS/Atom，静态托管。每 6 小时自动刷新。本站是聚合器，版权归原媒体。
+                    每张卡片进入站内整理：中文标题、总结与分析。想核对原话或完整报道，再到文末自行打开「阅读原文」。
                   </p>
                   <p className="summary">
                     当前筛选 {filtered.length} 条
@@ -233,11 +302,9 @@ export default function App() {
                       <time dateTime={it.publishedAt}>{formatTime(it.publishedAt)}</time>
                     </div>
                     <h3>
-                      <a className="ext" href={it.url} target="_blank" rel="noreferrer">
-                        {it.title}
-                      </a>
+                      <a href={`#/p/${it.id}`}>{displayTitle(it)}</a>
                     </h3>
-                    <p className="summary">{it.summary}</p>
+                    <p className="summary">{displayBlurb(it)}</p>
                   </article>
                 ))}
               </section>
@@ -248,12 +315,77 @@ export default function App() {
 
       <footer className="site-footer">
         <div className="shell">
-          全球AI速递是非官方聚合站点，仅用于个人阅读与信息索引。所有标题与摘要来自公开订阅源，点击跳转原文。
+          全球AI速递是非官方聚合站点，仅用于个人阅读与信息索引。点卡片看本站中文速读；原文自行打开。
           {' '}
           <a href="#/about">免责声明</a>
         </div>
       </footer>
     </>
+  )
+}
+
+function ArticleView({
+  item,
+  loading,
+  error,
+  notFound,
+}: {
+  item: NewsItem | null
+  loading: boolean
+  error: string
+  notFound: boolean
+}) {
+  if (error) return <p className="empty">无法载入新闻：{error}</p>
+  if (loading) return <p className="empty">正在打开速读…</p>
+  if (notFound || !item) {
+    return (
+      <section className="article">
+        <a className="back-link" href="#/">
+          ← 返回头条
+        </a>
+        <h1>找不到这篇速读</h1>
+        <p>可能已在最近一次刷新中更新。请回到头条重新打开。</p>
+      </section>
+    )
+  }
+
+  const original = item.titleOriginal || item.title
+  const zh = displayTitle(item)
+  const showOriginal = original && original !== zh
+  const paras = analysisList(item)
+  const href = sourceLink(item)
+
+  return (
+    <article className="article">
+      <a className="back-link" href="#/">
+        ← 返回头条
+      </a>
+      <p className="kicker">站内速读</p>
+      <div className="row-meta">
+        <span className={`cat ${item.category}`}>{item.category}</span>
+        <span>{item.source}</span>
+        <time dateTime={item.publishedAt}>{formatTime(item.publishedAt)}</time>
+      </div>
+      <h1>{zh}</h1>
+      {showOriginal && <p className="orig-title">原标题 · {original}</p>}
+
+      <section className="article-section" aria-labelledby="sec-summary">
+        <h2 id="sec-summary">总结</h2>
+        <p>{item.summaryZh || '订阅源未提供可用摘要，请直接阅读原文。'}</p>
+      </section>
+
+      <section className="article-section" aria-labelledby="sec-analysis">
+        <h2 id="sec-analysis">分析</h2>
+        {paras.length ? paras.map((p, i) => <p key={i}>{p}</p>) : <p>分析整理中。</p>}
+      </section>
+
+      <p className="origin-wrap">
+        <a className="read-origin ext" href={href} target="_blank" rel="noreferrer">
+          阅读原文
+        </a>
+        <span className="origin-hint">在新标签页打开 {item.source}</span>
+      </p>
+    </article>
   )
 }
 
@@ -266,13 +398,13 @@ function About({ data }: { data: NewsPayload | null }) {
         这是一份中文优先的全球人工智能新闻速览。目标很简单：打开页面，一分钟内跟上实验室、开源社区和产业前线正在发生的事。
       </p>
       <p>
-        本站在构建时抓取公开 RSS / Atom 源，生成静态 JSON，再部署到 GitHub Pages。没有登录，没有推荐算法，也没有发明出来的阅读量。
+        点卡片看本站中文速读（总结 + 分析）；原文自行打开。本站在构建时抓取公开 RSS / Atom 源，生成静态 JSON，再部署到 GitHub Pages。没有登录，没有推荐算法，也没有发明出来的阅读量。
       </p>
       <h2>免责声明</h2>
       <ul>
         <li>本站是聚合器，不是原创新闻机构；版权归各媒体与作者所有。</li>
-        <li>摘要尽量取自源站提供的 description / abstract，可能不完整。</li>
-        <li>链接一律指向原文。请以原站内容为准。</li>
+        <li>中文标题、总结与分析根据公开订阅源的标题与摘要编译，可能不完整，也不替代原文。</li>
+        <li>卡片进入本站速读页；需要原话与完整报道时，请点击文末「阅读原文」。</li>
         <li>部分源站可能暂时无法访问（防火墙、RSS 下线等），构建时会跳过失败源。</li>
       </ul>
       <h2>本轮来源</h2>

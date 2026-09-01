@@ -19,12 +19,12 @@ function headlineInject() {
       const data = JSON.parse(readFileSync(p, 'utf8'))
       const items = (data.items || []).slice(0, 24)
       const lis = items
-        .map(
-          (it: { url: string; title: string; source: string }) =>
-            `<li><a href="${escapeHtml(it.url)}">${escapeHtml(it.title)}</a> — ${escapeHtml(it.source)}</li>`,
-        )
+        .map((it: { id: string; url: string; title: string; titleZh?: string; source: string }) => {
+          const title = it.titleZh || it.title
+          return `<li><a href="#/p/${escapeHtml(it.id)}">${escapeHtml(title)}</a> — ${escapeHtml(it.source)}</li>`
+        })
         .join('')
-      const block = `<noscript><section><h1>全球AI速递</h1><p>需要 JavaScript 以使用筛选与搜索。以下为最新头条：</p><ol>${lis}</ol></section></noscript>`
+      const block = `<noscript><section><h1>全球AI速递</h1><p>需要 JavaScript 以打开站内中文速读。以下为最新头条：</p><ol>${lis}</ol></section></noscript>`
       return html.replace('<div id="root"></div>', `<div id="root"></div>\n    ${block}`)
     },
   }

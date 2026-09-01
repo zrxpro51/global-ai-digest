@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "fetch-news": "node scripts/fetch-feeds.mjs",
-    "dev": "node scripts/fetch-feeds.mjs && vite",
-    "build": "node scripts/fetch-feeds.mjs && vite build",
+    "fetch-news": "node scripts/fetch-feeds.mjs && node scripts/localize.mjs",
+    "dev": "node scripts/fetch-feeds.mjs && node scripts/localize.mjs && vite",
+    "build": "node scripts/fetch-feeds.mjs && node scripts/localize.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -370,6 +370,112 @@ input {
   opacity: 0.7;
 }
 
+.card,
+.hero-story {
+  position: relative;
+  cursor: pointer;
+}
+
+.card h3 a::after,
+.hero-story h2 a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.card:hover,
+.hero-story:hover {
+  border-color: color-mix(in srgb, var(--copper) 45%, var(--line));
+}
+
+.article {
+  padding: 22px 0 64px;
+  max-width: 44rem;
+}
+
+.article .back-link {
+  display: inline-block;
+  margin-bottom: 18px;
+  color: var(--ink-mute);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+.article .back-link:hover {
+  color: var(--copper-2);
+}
+
+.article h1 {
+  font-family: var(--font-serif);
+  font-size: clamp(1.55rem, 3.5vw, 2.35rem);
+  line-height: 1.28;
+  margin: 10px 0 8px;
+  font-weight: 700;
+}
+
+.orig-title {
+  color: var(--ink-mute);
+  font-size: 0.92rem;
+  margin: 0 0 20px;
+  line-height: 1.45;
+}
+
+.article-section {
+  margin: 18px 0;
+  padding: 18px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.article-section h2 {
+  font-family: var(--font-serif);
+  font-size: 1.12rem;
+  margin: 0 0 12px;
+  color: var(--copper-2);
+}
+
+.article-section p {
+  color: var(--ink-dim);
+  margin: 0 0 12px;
+}
+
+.article-section p:last-child {
+  margin-bottom: 0;
+}
+
+.origin-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 22px 0 0;
+}
+
+.read-origin {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-size: 0.95rem;
+  background: var(--bg-elev);
+}
+
+.read-origin:hover {
+  border-color: var(--copper);
+  color: var(--ink);
+}
+
+.origin-hint {
+  color: var(--ink-mute);
+  font-size: 0.85rem;
+}
+
 @media (max-width: 900px) {
   .featured {
     grid-template-columns: 1fr;
@@ -412,7 +518,8 @@ input {
     grid-template-columns: 1fr;
   }
   .hero,
-  .card {
+  .card,
+  .article-section {
     padding: 16px;
   }
   .brand-sub {
